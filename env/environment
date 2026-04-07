@@ -1,0 +1,48 @@
+import random
+from env.models import Observation, Action, Reward
+from env.tasks import TASKS
+from env.graders import grade_easy, grade_medium, grade_hard
+
+class SupportTriageEnv:
+    def __init__(self, task="easy"):
+        self.task = task
+        self.current_ticket = None
+        self.step_count = 0
+
+    def reset(self):
+        self.current_ticket = random.choice(TASKS[self.task])
+        self.step_count = 0
+        return Observation(
+            ticket_text=self.current_ticket["text"],
+            user_history=self.current_ticket.get("history", ""),
+            current_step=0
+        )
+
+    def step(self, action: Action):
+        self.step_count += 1
+
+        if self.task == "easy":
+            score = grade_easy(self.current_ticket, action)
+        elif self.task == "medium":
+            score = grade_medium(self.current_ticket, action)
+        else:
+            score = grade_hard(self.current_ticket, action)
+
+        done = True
+
+        return (
+            Observation(
+                ticket_text=self.current_ticket["text"],
+                user_history=self.current_ticket.get("history", ""),
+                current_step=self.step_count
+            ),
+            score,
+            done,
+            {"task": self.task}
+        )
+
+    def state(self):
+        return {
+            "ticket": self.current_ticket,
+            "step": self.step_count
+        }
