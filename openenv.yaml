@@ -1,0 +1,16 @@
+name: meta_support_triage_env
+description: AI environment for customer support triage at Meta scale
+
+tasks:
+  - name: easy
+  - name: medium
+  - name: hard
+
+api:
+  reset: /reset
+  step: /step
+  state: /state
+
+grading: deterministic
+
+reward_range: [0.0, 1.0]
