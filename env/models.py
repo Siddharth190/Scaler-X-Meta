@@ -7,10 +7,10 @@ class Observation(BaseModel):
     current_step: int
 
 class Action(BaseModel):
-    category: Optional[str]
-    priority: Optional[str]
-    team: Optional[str]
-    response: Optional[str]
+    category: str
+    priority: str
+    team: str
+    response: str
 
 class Reward(BaseModel):
     score: float
