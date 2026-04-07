@@ -5,6 +5,7 @@ import os
 import openai
 import pandas as pd
 import random
+from app import app
 
 app = FastAPI()
 openai.api_key = os.getenv("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")
