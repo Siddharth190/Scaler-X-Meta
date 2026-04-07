@@ -3,6 +3,7 @@ name = "meta-support-openenv"
 version = "0.1.0"
 description = "Meta Support Triage OpenEnv Environment"
 authors = [{name = "Avenger190"}]
+
 dependencies = [
     "fastapi",
     "uvicorn",
@@ -10,8 +11,12 @@ dependencies = [
     "gradio",
     "pandas",
     "requests",
-    "openai"
+    "openai",
+    "openenv>=0.2.0"
 ]
+
+[project.scripts]
+server = "server.app:app"
 
 [tool.openenv]
 entry_point = "app:app"
