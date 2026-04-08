@@ -3,13 +3,11 @@ import requests
 BASE_URL = "http://localhost:7860"
 
 def run_task(task):
-    print(f"\nRunning task: {task}")
+    print(f"[START] task={task}", flush=True)
 
-    # Reset
     r = requests.post(f"{BASE_URL}/reset")
-    obs = r.json()
-
     done = False
+    step = 0
     total_reward = 0
 
     while not done:
@@ -23,22 +21,24 @@ def run_task(task):
         r = requests.post(f"{BASE_URL}/step", json=action)
         data = r.json()
 
-        total_reward += data["reward"]
+        reward = data["reward"]
         done = data["done"]
 
-    return total_reward
+        step += 1
+        total_reward += reward
+
+        print(f"[STEP] step={step} reward={reward}", flush=True)
+
+    score = total_reward / step if step > 0 else 0
+
+    print(f"[END] task={task} score={score} steps={step}", flush=True)
 
 
 def main():
     tasks = ["easy", "medium", "hard"]
-    results = {}
 
     for t in tasks:
-        score = run_task(t)
-        results[t] = score
-
-    print("\nFinal Scores:")
-    print(results)
+        run_task(t)
 
 
 if __name__ == "__main__":
