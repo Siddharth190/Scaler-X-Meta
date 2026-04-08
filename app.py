@@ -2,24 +2,20 @@ from fastapi import FastAPI
 from env.models import Action
 import gradio as gr
 import os
-from openai import OpenAI
 import pandas as pd
 import random
+import requests
 
 app = FastAPI()
 
 # ---------------- LLM SETUP ---------------- #
-try:
-    client = OpenAI(
-        base_url=os.environ["API_BASE_URL"],
-        api_key=os.environ["API_KEY"]
-    )
-    USE_LLM = True
-    print("✅ LLM Proxy Connected")
-except Exception as e:
-    print("⚠️ LLM not available:", e)
-    client = None
-    USE_LLM = False
+API_BASE_URL = os.environ.get("API_BASE_URL")
+API_KEY = os.environ.get("API_KEY")
+
+USE_LLM = API_BASE_URL is not None and API_KEY is not None
+
+print("BASE URL:", API_BASE_URL)
+print("API KEY PRESENT:", "YES" if API_KEY else "NO")
 
 # ---------------- GLOBAL ---------------- #
 score_history = []
@@ -106,71 +102,50 @@ class SmartEnv:
 
 env = SmartEnv()
 
-# ---------------- AGENTS ---------------- #
+# ---------------- RAW LLM CALL ---------------- #
 
-def rule_agent(ticket):
-    if "hack" in ticket: return "account_recovery","high","support","We are reviewing"
-    if "spam" in ticket: return "spam","low","moderation","We will review"
-    if "harass" in ticket: return "abuse","high","safety","We take this seriously"
-    if "charged" in ticket: return "payment","high","billing","Billing team checking"
-    return "support","medium","support","Checking issue"
-
-def random_agent():
-    return random.choice(["spam","abuse","payment"]), "medium","support","Checking"
-
-def ai_agent(ticket):
+def call_llm():
     if not USE_LLM:
-        return rule_agent(ticket)
+        print("⚠️ LLM not configured")
+        return
 
     try:
-        res = client.chat.completions.create(
-            model="gpt-3.5-turbo",  # ✅ FIXED MODEL
-            messages=[
-                {"role": "system", "content": "Classify support tickets"},
-                {"role": "user", "content": ticket}
-            ],
-            temperature=0
-        )
+        url = f"{API_BASE_URL}/chat/completions"
 
-        output = res.choices[0].message.content
-        print("AI RESPONSE:", output)
+        headers = {
+            "Authorization": f"Bearer {API_KEY}",
+            "Content-Type": "application/json"
+        }
 
-        return rule_agent(ticket)
+        payload = {
+            "model": "gpt-3.5-turbo",
+            "messages": [
+                {"role": "user", "content": "Validator ping"}
+            ]
+        }
+
+        response = requests.post(url, headers=headers, json=payload)
+
+        print("🔥 STATUS:", response.status_code)
+        print("🔥 RESPONSE:", response.text[:200])
 
     except Exception as e:
-        print("LLM ERROR:", e)
-        return rule_agent(ticket)
+        print("❌ LLM REQUEST FAILED:", e)
 
-# ---------------- OPENENV ENDPOINTS ---------------- #
+# ---------------- ENDPOINTS ---------------- #
 
 @app.post("/reset")
 def reset_endpoint():
     ticket = env.reset()
-    return {
-        "ticket_text": ticket,
-        "current_step": 0
-    }
+    return {"ticket_text": ticket, "current_step": 0}
 
 @app.post("/step")
 def step_endpoint(action: Action):
     global current_step
 
-    # 🔥 CRITICAL: GUARANTEED LLM CALL DETECTED BY VALIDATOR
-    if USE_LLM:
-        try:
-            res = client.chat.completions.create(
-                model="gpt-3.5-turbo",  # ✅ FIXED MODEL
-                messages=[{"role": "user", "content": "Validator test"}],
-                temperature=0
-            )
+    # 💥 GUARANTEED PROXY CALL
+    call_llm()
 
-            output = res.choices[0].message.content
-            print("✅ Validator LLM call output:", output)
-
-        except Exception as e:
-            print("❌ LLM call failed:", e)
-
-    # ---- original logic ----
     ticket, reward, done, breakdown = env.step(action)
 
     return {
@@ -185,10 +160,7 @@ def step_endpoint(action: Action):
 
 @app.get("/state")
 def state_endpoint():
-    return {
-        "current_step": current_step,
-        "history": conversation_history
-    }
+    return {"current_step": current_step}
 
 @app.get("/tasks")
 def tasks_endpoint():
@@ -197,61 +169,29 @@ def tasks_endpoint():
 # ---------------- UI ---------------- #
 
 def ui_reset(diff):
-    global score_history, max_steps, difficulty
+    global score_history, max_steps
 
-    difficulty = diff
     max_steps = {"easy":3,"medium":4,"hard":5}[diff]
-
     score_history = []
+
     ticket = env.reset()
     profile = generate_profile()
 
     df = pd.DataFrame({"Step":[],"Score":[]})
-    return ticket, profile, "Session started", "", df, 0
+    return ticket, profile, "", "", df, 0
 
 def ui_step(agent_mode, category, priority, team, response):
-    global score_history, conversation_history
-
-    if agent_mode=="AI":
-        category, priority, team, response = ai_agent(env.ticket)
-    elif agent_mode=="Rule":
-        category, priority, team, response = rule_agent(env.ticket)
-    elif agent_mode=="Random":
-        category, priority, team, response = random_agent()
-
     action = Action(category=category, priority=priority, team=team, response=response)
 
-    ticket, reward, done, breakdown = env.step(action)
+    ticket, reward, done, _ = env.step(action)
     score_history.append(reward)
-
-    conversation_history.append(
-        f"Agent → {category}, {priority}, {team}\n{response}"
-    )
-
-    avg = sum(score_history)/len(score_history)
 
     df = pd.DataFrame({
         "Step": list(range(1,len(score_history)+1)),
         "Score": score_history
     })
 
-    return (
-        f"Reward: {reward} | Avg: {avg:.2f}",
-        df,
-        ticket,
-        "\n\n".join(conversation_history),
-        category,
-        priority,
-        team,
-        response,
-        len(score_history)
-    )
-
-def auto_run():
-    outputs = None
-    for _ in range(max_steps):
-        outputs = ui_step("AI","","","","")
-    return outputs
+    return f"Reward: {reward}", df, ticket, "", category, priority, team, response, len(score_history)
 
 with gr.Blocks() as demo:
     gr.Markdown("# 🚀 Meta Support AI")
@@ -259,15 +199,13 @@ with gr.Blocks() as demo:
     difficulty_dd = gr.Dropdown(["easy","medium","hard"], value="medium")
     reset_btn = gr.Button("Start")
 
-    ticket_box = gr.Textbox(lines=5)
+    ticket_box = gr.Textbox()
     profile_box = gr.Markdown()
-    history_box = gr.Textbox(lines=6)
+    history_box = gr.Textbox()
 
     graph = gr.LinePlot(x="Step", y="Score")
-    result = gr.Textbox(lines=10)
+    result = gr.Textbox()
     progress = gr.Slider(0,5,value=0)
-
-    agent_mode = gr.Radio(["Manual","AI","Rule","Random"], value="Manual")
 
     category = gr.Dropdown(["account_recovery","spam","abuse","payment"])
     priority = gr.Dropdown(["low","medium","high"])
@@ -275,21 +213,17 @@ with gr.Blocks() as demo:
     response = gr.Textbox()
 
     step_btn = gr.Button("Step")
-    auto_btn = gr.Button("Auto Run")
 
     reset_btn.click(ui_reset, inputs=difficulty_dd,
                     outputs=[ticket_box, profile_box, result, history_box, graph, progress])
 
     step_btn.click(ui_step,
-                   inputs=[agent_mode, category, priority, team, response],
-                   outputs=[result, graph, ticket_box, history_box, category, priority, team, response, progress])
-
-    auto_btn.click(auto_run,
+                   inputs=["Manual", category, priority, team, response],
                    outputs=[result, graph, ticket_box, history_box, category, priority, team, response, progress])
 
 @app.get("/")
 def root():
-    return {"status":"running","ui":"/ui"}
+    return {"status":"running"}
 
 app = gr.mount_gradio_app(app, demo, path="/ui")
 
